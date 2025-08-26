@@ -4,6 +4,7 @@ import "time"
 
 type Side string
 type OrderType string
+type OrderStatus string
 
 const (
 	Buy  Side = "BUY"
@@ -11,30 +12,35 @@ const (
 
 	Limit  OrderType = "LIMIT"
 	Market OrderType = "MARKET"
+
+	Open     OrderStatus = "OPEN"
+	Filled   OrderStatus = "FILLED"
+	Canceled OrderStatus = "CANCELED"
 )
 
 type Order struct {
-	ID        string    `json:"id"`
-	ClientID  string    `json:"client_id"`
-	Symbol    string    `json:"symbol"`
-	Side      Side      `json:"side"`
-	Type      OrderType `json:"type"`
-	Price     float64   `json:"price"`
-	Quantity  float64   `json:"quantity"`
-	Remaining float64   `json:"remaining"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string
+	ClientID  string
+	Symbol    string
+	Side      Side
+	Type      OrderType
+	Price     float64
+	Quantity  float64
+	Remaining float64
+	Status    OrderStatus
+	CreatedAt time.Time
 }
 
 type Trade struct {
-	ID        string    `json:"id"`
-	BuyOrder  string    `json:"buy_order"`
-	SellOrder string    `json:"sell_order"`
-	Price     float64   `json:"price"`
-	Quantity  float64   `json:"quantity"`
-	Timestamp time.Time `json:"timestamp"`
+	ID        string
+	BuyOrder  string
+	SellOrder string
+	Price     float64
+	Quantity  float64
+	Timestamp time.Time
 }
 
 type OrderbookSnapshot struct {
-	Bids []Order `json:"bids"`
-	Asks []Order `json:"asks"`
+	Bids []Order
+	Asks []Order
 }

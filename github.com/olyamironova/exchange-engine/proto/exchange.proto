@@ -5,27 +5,26 @@ package exchange;
 option go_package = "github.com/olyamironova/exchange-engine/proto;proto";
 
 service Exchange {
-  // main flow
+  // основной flow
   rpc SubmitOrder(SubmitOrderRequest) returns (SubmitOrderResponse);
   rpc BatchSubmitOrders(BatchSubmitOrdersRequest) returns (BatchSubmitOrdersResponse);
   rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
   rpc ModifyOrder(ModifyOrderRequest) returns (ModifyOrderResponse);
   rpc GetOrderStatus(GetOrderStatusRequest) returns (GetOrderStatusResponse);
 
-  // receiving data
-  rpc GetTrades(GetTradesRequest) returns (GetTradesResponse);
+  // получение данных
   rpc GetOrderbook(GetOrderbookRequest) returns (GetOrderbookResponse);
   rpc ListSymbols(ListSymbolsRequest) returns (ListSymbolsResponse);
 
-  // streams (server-side streaming)
+  // стримы (server-side streaming)
   rpc StreamOrderbook(StreamOrderbookRequest) returns (stream OrderbookUpdate);
   rpc StreamTrades(StreamTradesRequest) returns (stream Trade);
 
-  // admin / snapshot
+  // админ / snapshot
   rpc SnapshotOrderbook(SnapshotRequest) returns (SnapshotResponse);
   rpc RestoreOrderbook(RestoreRequest) returns (RestoreResponse);
 
-  // utilities
+  // утилиты
   rpc RateLimitStatus(RateLimitRequest) returns (RateLimitResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
 }
@@ -37,7 +36,7 @@ message SubmitOrderRequest {
   string type = 4; // LIMIT/MARKET
   double price = 5;
   double quantity = 6;
-  string client_order_id = 7;
+  string client_order_id = 7; // опциональный id ордера от клиента
 }
 
 message SubmitOrderResponse {
@@ -97,7 +96,7 @@ message GetOrderStatusResponse {
 
 message GetOrderbookRequest {
   string symbol = 1;
-  int32 depth = 2;
+  int32 depth = 2; // дополнительный (сколько уровней)
 }
 
 message GetOrderbookResponse {
@@ -125,7 +124,7 @@ message OrderbookUpdate {
 }
 
 message StreamTradesRequest {
-  string symbol = 1;
+  string symbol = 1; // если пустая строка, то все символы
 }
 
 message SnapshotRequest {
@@ -182,12 +181,4 @@ message Trade {
   double price = 4;
   double quantity = 5;
   int64 timestamp_unix = 6;
-}
-
-message GetTradesRequest {
-  string symbol = 1;
-}
-
-message GetTradesResponse {
-  repeated Trade trades = 1;
 }
