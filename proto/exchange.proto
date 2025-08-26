@@ -2,9 +2,31 @@ syntax = "proto3";
 
 package exchange;
 
+option go_package = "github.com/olyamironova/exchange-engine/proto;proto";
+
 service Exchange {
+  // основной flow
   rpc SubmitOrder(SubmitOrderRequest) returns (SubmitOrderResponse);
+  rpc BatchSubmitOrders(BatchSubmitOrdersRequest) returns (BatchSubmitOrdersResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  rpc ModifyOrder(ModifyOrderRequest) returns (ModifyOrderResponse);
+  rpc GetOrderStatus(GetOrderStatusRequest) returns (GetOrderStatusResponse);
+
+  // получение данных
   rpc GetOrderbook(GetOrderbookRequest) returns (GetOrderbookResponse);
+  rpc ListSymbols(ListSymbolsRequest) returns (ListSymbolsResponse);
+
+  // стримы (server-side streaming)
+  rpc StreamOrderbook(StreamOrderbookRequest) returns (stream OrderbookUpdate);
+  rpc StreamTrades(StreamTradesRequest) returns (stream Trade);
+
+  // админ / snapshot
+  rpc SnapshotOrderbook(SnapshotRequest) returns (SnapshotResponse);
+  rpc RestoreOrderbook(RestoreRequest) returns (RestoreResponse);
+
+  // утилиты
+  rpc RateLimitStatus(RateLimitRequest) returns (RateLimitResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
 }
 
 message SubmitOrderRequest {
@@ -14,6 +36,7 @@ message SubmitOrderRequest {
   string type = 4; // LIMIT/MARKET
   double price = 5;
   double quantity = 6;
+  string client_order_id = 7; // опциональный id ордера от клиента
 }
 
 message SubmitOrderResponse {
@@ -22,13 +45,121 @@ message SubmitOrderResponse {
   double remaining = 3;
 }
 
+message BatchSubmitOrdersRequest {
+  repeated SubmitOrderRequest orders = 1;
+}
+
+message BatchSubmitOrdersResponse {
+  repeated SubmitOrderResponse results = 1;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+  string client_id = 2;
+}
+
+message CancelOrderResponse {
+  string order_id = 1;
+  bool cancelled = 2;
+  string message = 3;
+}
+
+message ModifyOrderRequest {
+  string order_id = 1;
+  string client_id = 2;
+  double new_price = 3;
+  double new_quantity = 4;
+}
+
+message ModifyOrderResponse {
+  string order_id = 1;
+  bool modified = 2;
+  string message = 3;
+}
+
+message GetOrderStatusRequest {
+  string order_id = 1;
+}
+
+message GetOrderStatusResponse {
+  string order_id = 1;
+  string client_id = 2;
+  string symbol = 3;
+  string side = 4;
+  string type = 5;
+  double price = 6;
+  double quantity = 7;
+  double remaining = 8;
+  string status = 9; // NEW / PARTIALLY_FILLED / FILLED / CANCELLED
+  repeated Trade trades = 10;
+}
+
 message GetOrderbookRequest {
   string symbol = 1;
+  int32 depth = 2; // дополнительный (сколько уровней)
 }
 
 message GetOrderbookResponse {
   repeated Order bids = 1;
   repeated Order asks = 2;
+  int64 timestamp = 3;
+}
+
+message ListSymbolsRequest {}
+
+message ListSymbolsResponse {
+  repeated string symbols = 1;
+}
+
+message StreamOrderbookRequest {
+  string symbol = 1;
+  int32 depth = 2;
+}
+
+message OrderbookUpdate {
+  string symbol = 1;
+  repeated Order bids = 2;
+  repeated Order asks = 3;
+  int64 timestamp = 4;
+}
+
+message StreamTradesRequest {
+  string symbol = 1; // если пустая строка, то все символы
+}
+
+message SnapshotRequest {
+  string symbol = 1;
+}
+
+message SnapshotResponse {
+  string snapshot_id = 1;
+  string message = 2;
+}
+
+message RestoreRequest {
+  string snapshot_id = 1;
+}
+
+message RestoreResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message RateLimitRequest {
+  string client_id = 1;
+}
+
+message RateLimitResponse {
+  string client_id = 1;
+  int32 limit = 2;
+  int32 remaining = 3;
+  int64 reset_at_unix = 4;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
 }
 
 message Order {
@@ -40,6 +171,7 @@ message Order {
   double price = 6;
   double quantity = 7;
   double remaining = 8;
+  int64 created_at = 9;
 }
 
 message Trade {
@@ -48,5 +180,5 @@ message Trade {
   string sell_order = 3;
   double price = 4;
   double quantity = 5;
-  string timestamp = 6;
+  int64 timestamp_unix = 6;
 }
