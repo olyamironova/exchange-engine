@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: exchange-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: exchange
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 5
+      timeout: 2s
+    networks:
+      - exchange_net
+
+  flyway:
+    image: flyway/flyway:9
+    container_name: flyway
+    depends_on:
+      - db
+    environment:
+      FLYWAY_URL: jdbc:postgresql://db:5432/exchange
+      FLYWAY_USER: postgres
+      FLYWAY_PASSWORD: postgres
+    volumes:
+      - ./sql/migrations:/flyway/sql
+    command: -connectRetries=60 migrate
+    networks:
+      - exchange_net
+
+  server:
+    build: .
+    depends_on:
+      - flyway
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/exchange?sslmode=disable
+    ports:
+      - "8080:8080"
+    command: ["./server"]
+    networks:
+      - exchange_net
+
+volumes:
+  db_data:
+
+networks:
+  exchange_net:
