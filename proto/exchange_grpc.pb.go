@@ -4,7 +4,7 @@
 // - protoc             v6.32.0
 // source: proto/exchange.proto
 
-package proto
+package exchange
 
 import (
 	context "context"
@@ -19,45 +19,28 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Exchange_SubmitOrder_FullMethodName       = "/exchange.Exchange/SubmitOrder"
-	Exchange_BatchSubmitOrders_FullMethodName = "/exchange.Exchange/BatchSubmitOrders"
-	Exchange_CancelOrder_FullMethodName       = "/exchange.Exchange/CancelOrder"
-	Exchange_ModifyOrder_FullMethodName       = "/exchange.Exchange/ModifyOrder"
-	Exchange_GetOrderStatus_FullMethodName    = "/exchange.Exchange/GetOrderStatus"
-	Exchange_GetTrades_FullMethodName         = "/exchange.Exchange/GetTrades"
-	Exchange_GetOrderbook_FullMethodName      = "/exchange.Exchange/GetOrderbook"
-	Exchange_ListSymbols_FullMethodName       = "/exchange.Exchange/ListSymbols"
-	Exchange_StreamOrderbook_FullMethodName   = "/exchange.Exchange/StreamOrderbook"
-	Exchange_StreamTrades_FullMethodName      = "/exchange.Exchange/StreamTrades"
-	Exchange_SnapshotOrderbook_FullMethodName = "/exchange.Exchange/SnapshotOrderbook"
-	Exchange_RestoreOrderbook_FullMethodName  = "/exchange.Exchange/RestoreOrderbook"
-	Exchange_RateLimitStatus_FullMethodName   = "/exchange.Exchange/RateLimitStatus"
-	Exchange_Health_FullMethodName            = "/exchange.Exchange/Health"
+	Exchange_SubmitOrder_FullMethodName       = "/proto.Exchange/SubmitOrder"
+	Exchange_ModifyOrder_FullMethodName       = "/proto.Exchange/ModifyOrder"
+	Exchange_CancelOrder_FullMethodName       = "/proto.Exchange/CancelOrder"
+	Exchange_GetOrder_FullMethodName          = "/proto.Exchange/GetOrder"
+	Exchange_GetTradesForOrder_FullMethodName = "/proto.Exchange/GetTradesForOrder"
+	Exchange_GetOrderbook_FullMethodName      = "/proto.Exchange/GetOrderbook"
+	Exchange_SnapshotOrderbook_FullMethodName = "/proto.Exchange/SnapshotOrderbook"
+	Exchange_RestoreOrderbook_FullMethodName  = "/proto.Exchange/RestoreOrderbook"
 )
 
 // ExchangeClient is the client API for Exchange service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ExchangeClient interface {
-	// основной flow
 	SubmitOrder(ctx context.Context, in *SubmitOrderRequest, opts ...grpc.CallOption) (*SubmitOrderResponse, error)
-	BatchSubmitOrders(ctx context.Context, in *BatchSubmitOrdersRequest, opts ...grpc.CallOption) (*BatchSubmitOrdersResponse, error)
-	CancelOrder(ctx context.Context, in *CancelOrderRequest, opts ...grpc.CallOption) (*CancelOrderResponse, error)
 	ModifyOrder(ctx context.Context, in *ModifyOrderRequest, opts ...grpc.CallOption) (*ModifyOrderResponse, error)
-	GetOrderStatus(ctx context.Context, in *GetOrderStatusRequest, opts ...grpc.CallOption) (*GetOrderStatusResponse, error)
-	// получение данных
-	GetTrades(ctx context.Context, in *GetTradesRequest, opts ...grpc.CallOption) (*GetTradesResponse, error)
+	CancelOrder(ctx context.Context, in *CancelOrderRequest, opts ...grpc.CallOption) (*CancelOrderResponse, error)
+	GetOrder(ctx context.Context, in *GetOrderRequest, opts ...grpc.CallOption) (*GetOrderResponse, error)
+	GetTradesForOrder(ctx context.Context, in *GetTradesRequest, opts ...grpc.CallOption) (*GetTradesResponse, error)
 	GetOrderbook(ctx context.Context, in *GetOrderbookRequest, opts ...grpc.CallOption) (*GetOrderbookResponse, error)
-	ListSymbols(ctx context.Context, in *ListSymbolsRequest, opts ...grpc.CallOption) (*ListSymbolsResponse, error)
-	// стримы (server-side streaming)
-	StreamOrderbook(ctx context.Context, in *StreamOrderbookRequest, opts ...grpc.CallOption) (Exchange_StreamOrderbookClient, error)
-	StreamTrades(ctx context.Context, in *StreamTradesRequest, opts ...grpc.CallOption) (Exchange_StreamTradesClient, error)
-	// админ / snapshot
 	SnapshotOrderbook(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*SnapshotResponse, error)
 	RestoreOrderbook(ctx context.Context, in *RestoreRequest, opts ...grpc.CallOption) (*RestoreResponse, error)
-	// утилиты
-	RateLimitStatus(ctx context.Context, in *RateLimitRequest, opts ...grpc.CallOption) (*RateLimitResponse, error)
-	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
 
 type exchangeClient struct {
@@ -77,9 +60,9 @@ func (c *exchangeClient) SubmitOrder(ctx context.Context, in *SubmitOrderRequest
 	return out, nil
 }
 
-func (c *exchangeClient) BatchSubmitOrders(ctx context.Context, in *BatchSubmitOrdersRequest, opts ...grpc.CallOption) (*BatchSubmitOrdersResponse, error) {
-	out := new(BatchSubmitOrdersResponse)
-	err := c.cc.Invoke(ctx, Exchange_BatchSubmitOrders_FullMethodName, in, out, opts...)
+func (c *exchangeClient) ModifyOrder(ctx context.Context, in *ModifyOrderRequest, opts ...grpc.CallOption) (*ModifyOrderResponse, error) {
+	out := new(ModifyOrderResponse)
+	err := c.cc.Invoke(ctx, Exchange_ModifyOrder_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -95,27 +78,18 @@ func (c *exchangeClient) CancelOrder(ctx context.Context, in *CancelOrderRequest
 	return out, nil
 }
 
-func (c *exchangeClient) ModifyOrder(ctx context.Context, in *ModifyOrderRequest, opts ...grpc.CallOption) (*ModifyOrderResponse, error) {
-	out := new(ModifyOrderResponse)
-	err := c.cc.Invoke(ctx, Exchange_ModifyOrder_FullMethodName, in, out, opts...)
+func (c *exchangeClient) GetOrder(ctx context.Context, in *GetOrderRequest, opts ...grpc.CallOption) (*GetOrderResponse, error) {
+	out := new(GetOrderResponse)
+	err := c.cc.Invoke(ctx, Exchange_GetOrder_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *exchangeClient) GetOrderStatus(ctx context.Context, in *GetOrderStatusRequest, opts ...grpc.CallOption) (*GetOrderStatusResponse, error) {
-	out := new(GetOrderStatusResponse)
-	err := c.cc.Invoke(ctx, Exchange_GetOrderStatus_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *exchangeClient) GetTrades(ctx context.Context, in *GetTradesRequest, opts ...grpc.CallOption) (*GetTradesResponse, error) {
+func (c *exchangeClient) GetTradesForOrder(ctx context.Context, in *GetTradesRequest, opts ...grpc.CallOption) (*GetTradesResponse, error) {
 	out := new(GetTradesResponse)
-	err := c.cc.Invoke(ctx, Exchange_GetTrades_FullMethodName, in, out, opts...)
+	err := c.cc.Invoke(ctx, Exchange_GetTradesForOrder_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -129,79 +103,6 @@ func (c *exchangeClient) GetOrderbook(ctx context.Context, in *GetOrderbookReque
 		return nil, err
 	}
 	return out, nil
-}
-
-func (c *exchangeClient) ListSymbols(ctx context.Context, in *ListSymbolsRequest, opts ...grpc.CallOption) (*ListSymbolsResponse, error) {
-	out := new(ListSymbolsResponse)
-	err := c.cc.Invoke(ctx, Exchange_ListSymbols_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *exchangeClient) StreamOrderbook(ctx context.Context, in *StreamOrderbookRequest, opts ...grpc.CallOption) (Exchange_StreamOrderbookClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Exchange_ServiceDesc.Streams[0], Exchange_StreamOrderbook_FullMethodName, opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &exchangeStreamOrderbookClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type Exchange_StreamOrderbookClient interface {
-	Recv() (*OrderbookUpdate, error)
-	grpc.ClientStream
-}
-
-type exchangeStreamOrderbookClient struct {
-	grpc.ClientStream
-}
-
-func (x *exchangeStreamOrderbookClient) Recv() (*OrderbookUpdate, error) {
-	m := new(OrderbookUpdate)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-func (c *exchangeClient) StreamTrades(ctx context.Context, in *StreamTradesRequest, opts ...grpc.CallOption) (Exchange_StreamTradesClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Exchange_ServiceDesc.Streams[1], Exchange_StreamTrades_FullMethodName, opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &exchangeStreamTradesClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type Exchange_StreamTradesClient interface {
-	Recv() (*Trade, error)
-	grpc.ClientStream
-}
-
-type exchangeStreamTradesClient struct {
-	grpc.ClientStream
-}
-
-func (x *exchangeStreamTradesClient) Recv() (*Trade, error) {
-	m := new(Trade)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
 func (c *exchangeClient) SnapshotOrderbook(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*SnapshotResponse, error) {
@@ -222,47 +123,18 @@ func (c *exchangeClient) RestoreOrderbook(ctx context.Context, in *RestoreReques
 	return out, nil
 }
 
-func (c *exchangeClient) RateLimitStatus(ctx context.Context, in *RateLimitRequest, opts ...grpc.CallOption) (*RateLimitResponse, error) {
-	out := new(RateLimitResponse)
-	err := c.cc.Invoke(ctx, Exchange_RateLimitStatus_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *exchangeClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
-	out := new(HealthResponse)
-	err := c.cc.Invoke(ctx, Exchange_Health_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ExchangeServer is the server API for Exchange service.
 // All implementations must embed UnimplementedExchangeServer
 // for forward compatibility
 type ExchangeServer interface {
-	// основной flow
 	SubmitOrder(context.Context, *SubmitOrderRequest) (*SubmitOrderResponse, error)
-	BatchSubmitOrders(context.Context, *BatchSubmitOrdersRequest) (*BatchSubmitOrdersResponse, error)
-	CancelOrder(context.Context, *CancelOrderRequest) (*CancelOrderResponse, error)
 	ModifyOrder(context.Context, *ModifyOrderRequest) (*ModifyOrderResponse, error)
-	GetOrderStatus(context.Context, *GetOrderStatusRequest) (*GetOrderStatusResponse, error)
-	// получение данных
-	GetTrades(context.Context, *GetTradesRequest) (*GetTradesResponse, error)
+	CancelOrder(context.Context, *CancelOrderRequest) (*CancelOrderResponse, error)
+	GetOrder(context.Context, *GetOrderRequest) (*GetOrderResponse, error)
+	GetTradesForOrder(context.Context, *GetTradesRequest) (*GetTradesResponse, error)
 	GetOrderbook(context.Context, *GetOrderbookRequest) (*GetOrderbookResponse, error)
-	ListSymbols(context.Context, *ListSymbolsRequest) (*ListSymbolsResponse, error)
-	// стримы (server-side streaming)
-	StreamOrderbook(*StreamOrderbookRequest, Exchange_StreamOrderbookServer) error
-	StreamTrades(*StreamTradesRequest, Exchange_StreamTradesServer) error
-	// админ / snapshot
 	SnapshotOrderbook(context.Context, *SnapshotRequest) (*SnapshotResponse, error)
 	RestoreOrderbook(context.Context, *RestoreRequest) (*RestoreResponse, error)
-	// утилиты
-	RateLimitStatus(context.Context, *RateLimitRequest) (*RateLimitResponse, error)
-	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	mustEmbedUnimplementedExchangeServer()
 }
 
@@ -273,44 +145,26 @@ type UnimplementedExchangeServer struct {
 func (UnimplementedExchangeServer) SubmitOrder(context.Context, *SubmitOrderRequest) (*SubmitOrderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitOrder not implemented")
 }
-func (UnimplementedExchangeServer) BatchSubmitOrders(context.Context, *BatchSubmitOrdersRequest) (*BatchSubmitOrdersResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BatchSubmitOrders not implemented")
+func (UnimplementedExchangeServer) ModifyOrder(context.Context, *ModifyOrderRequest) (*ModifyOrderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ModifyOrder not implemented")
 }
 func (UnimplementedExchangeServer) CancelOrder(context.Context, *CancelOrderRequest) (*CancelOrderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelOrder not implemented")
 }
-func (UnimplementedExchangeServer) ModifyOrder(context.Context, *ModifyOrderRequest) (*ModifyOrderResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ModifyOrder not implemented")
+func (UnimplementedExchangeServer) GetOrder(context.Context, *GetOrderRequest) (*GetOrderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetOrder not implemented")
 }
-func (UnimplementedExchangeServer) GetOrderStatus(context.Context, *GetOrderStatusRequest) (*GetOrderStatusResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetOrderStatus not implemented")
-}
-func (UnimplementedExchangeServer) GetTrades(context.Context, *GetTradesRequest) (*GetTradesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTrades not implemented")
+func (UnimplementedExchangeServer) GetTradesForOrder(context.Context, *GetTradesRequest) (*GetTradesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTradesForOrder not implemented")
 }
 func (UnimplementedExchangeServer) GetOrderbook(context.Context, *GetOrderbookRequest) (*GetOrderbookResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetOrderbook not implemented")
-}
-func (UnimplementedExchangeServer) ListSymbols(context.Context, *ListSymbolsRequest) (*ListSymbolsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ListSymbols not implemented")
-}
-func (UnimplementedExchangeServer) StreamOrderbook(*StreamOrderbookRequest, Exchange_StreamOrderbookServer) error {
-	return status.Errorf(codes.Unimplemented, "method StreamOrderbook not implemented")
-}
-func (UnimplementedExchangeServer) StreamTrades(*StreamTradesRequest, Exchange_StreamTradesServer) error {
-	return status.Errorf(codes.Unimplemented, "method StreamTrades not implemented")
 }
 func (UnimplementedExchangeServer) SnapshotOrderbook(context.Context, *SnapshotRequest) (*SnapshotResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SnapshotOrderbook not implemented")
 }
 func (UnimplementedExchangeServer) RestoreOrderbook(context.Context, *RestoreRequest) (*RestoreResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RestoreOrderbook not implemented")
-}
-func (UnimplementedExchangeServer) RateLimitStatus(context.Context, *RateLimitRequest) (*RateLimitResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RateLimitStatus not implemented")
-}
-func (UnimplementedExchangeServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
 }
 func (UnimplementedExchangeServer) mustEmbedUnimplementedExchangeServer() {}
 
@@ -343,20 +197,20 @@ func _Exchange_SubmitOrder_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Exchange_BatchSubmitOrders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BatchSubmitOrdersRequest)
+func _Exchange_ModifyOrder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ModifyOrderRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ExchangeServer).BatchSubmitOrders(ctx, in)
+		return srv.(ExchangeServer).ModifyOrder(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Exchange_BatchSubmitOrders_FullMethodName,
+		FullMethod: Exchange_ModifyOrder_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExchangeServer).BatchSubmitOrders(ctx, req.(*BatchSubmitOrdersRequest))
+		return srv.(ExchangeServer).ModifyOrder(ctx, req.(*ModifyOrderRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -379,56 +233,38 @@ func _Exchange_CancelOrder_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Exchange_ModifyOrder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ModifyOrderRequest)
+func _Exchange_GetOrder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOrderRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ExchangeServer).ModifyOrder(ctx, in)
+		return srv.(ExchangeServer).GetOrder(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Exchange_ModifyOrder_FullMethodName,
+		FullMethod: Exchange_GetOrder_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExchangeServer).ModifyOrder(ctx, req.(*ModifyOrderRequest))
+		return srv.(ExchangeServer).GetOrder(ctx, req.(*GetOrderRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Exchange_GetOrderStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetOrderStatusRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ExchangeServer).GetOrderStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Exchange_GetOrderStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExchangeServer).GetOrderStatus(ctx, req.(*GetOrderStatusRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Exchange_GetTrades_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Exchange_GetTradesForOrder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetTradesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ExchangeServer).GetTrades(ctx, in)
+		return srv.(ExchangeServer).GetTradesForOrder(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Exchange_GetTrades_FullMethodName,
+		FullMethod: Exchange_GetTradesForOrder_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExchangeServer).GetTrades(ctx, req.(*GetTradesRequest))
+		return srv.(ExchangeServer).GetTradesForOrder(ctx, req.(*GetTradesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -449,66 +285,6 @@ func _Exchange_GetOrderbook_Handler(srv interface{}, ctx context.Context, dec fu
 		return srv.(ExchangeServer).GetOrderbook(ctx, req.(*GetOrderbookRequest))
 	}
 	return interceptor(ctx, in, info, handler)
-}
-
-func _Exchange_ListSymbols_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListSymbolsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ExchangeServer).ListSymbols(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Exchange_ListSymbols_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExchangeServer).ListSymbols(ctx, req.(*ListSymbolsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Exchange_StreamOrderbook_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(StreamOrderbookRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(ExchangeServer).StreamOrderbook(m, &exchangeStreamOrderbookServer{stream})
-}
-
-type Exchange_StreamOrderbookServer interface {
-	Send(*OrderbookUpdate) error
-	grpc.ServerStream
-}
-
-type exchangeStreamOrderbookServer struct {
-	grpc.ServerStream
-}
-
-func (x *exchangeStreamOrderbookServer) Send(m *OrderbookUpdate) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func _Exchange_StreamTrades_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(StreamTradesRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(ExchangeServer).StreamTrades(m, &exchangeStreamTradesServer{stream})
-}
-
-type Exchange_StreamTradesServer interface {
-	Send(*Trade) error
-	grpc.ServerStream
-}
-
-type exchangeStreamTradesServer struct {
-	grpc.ServerStream
-}
-
-func (x *exchangeStreamTradesServer) Send(m *Trade) error {
-	return x.ServerStream.SendMsg(m)
 }
 
 func _Exchange_SnapshotOrderbook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -547,47 +323,11 @@ func _Exchange_RestoreOrderbook_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Exchange_RateLimitStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RateLimitRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ExchangeServer).RateLimitStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Exchange_RateLimitStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExchangeServer).RateLimitStatus(ctx, req.(*RateLimitRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Exchange_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HealthRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ExchangeServer).Health(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Exchange_Health_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExchangeServer).Health(ctx, req.(*HealthRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Exchange_ServiceDesc is the grpc.ServiceDesc for Exchange service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Exchange_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "exchange.Exchange",
+	ServiceName: "proto.Exchange",
 	HandlerType: (*ExchangeServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -595,32 +335,24 @@ var Exchange_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Exchange_SubmitOrder_Handler,
 		},
 		{
-			MethodName: "BatchSubmitOrders",
-			Handler:    _Exchange_BatchSubmitOrders_Handler,
+			MethodName: "ModifyOrder",
+			Handler:    _Exchange_ModifyOrder_Handler,
 		},
 		{
 			MethodName: "CancelOrder",
 			Handler:    _Exchange_CancelOrder_Handler,
 		},
 		{
-			MethodName: "ModifyOrder",
-			Handler:    _Exchange_ModifyOrder_Handler,
+			MethodName: "GetOrder",
+			Handler:    _Exchange_GetOrder_Handler,
 		},
 		{
-			MethodName: "GetOrderStatus",
-			Handler:    _Exchange_GetOrderStatus_Handler,
-		},
-		{
-			MethodName: "GetTrades",
-			Handler:    _Exchange_GetTrades_Handler,
+			MethodName: "GetTradesForOrder",
+			Handler:    _Exchange_GetTradesForOrder_Handler,
 		},
 		{
 			MethodName: "GetOrderbook",
 			Handler:    _Exchange_GetOrderbook_Handler,
-		},
-		{
-			MethodName: "ListSymbols",
-			Handler:    _Exchange_ListSymbols_Handler,
 		},
 		{
 			MethodName: "SnapshotOrderbook",
@@ -630,26 +362,7 @@ var Exchange_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "RestoreOrderbook",
 			Handler:    _Exchange_RestoreOrderbook_Handler,
 		},
-		{
-			MethodName: "RateLimitStatus",
-			Handler:    _Exchange_RateLimitStatus_Handler,
-		},
-		{
-			MethodName: "Health",
-			Handler:    _Exchange_Health_Handler,
-		},
 	},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "StreamOrderbook",
-			Handler:       _Exchange_StreamOrderbook_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "StreamTrades",
-			Handler:       _Exchange_StreamTrades_Handler,
-			ServerStreams: true,
-		},
-	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "proto/exchange.proto",
 }
