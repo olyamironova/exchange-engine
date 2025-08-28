@@ -16,6 +16,14 @@ const (
 	Sell Side = "SELL"
 )
 
+type OrderStatus string
+
+const (
+	Open      OrderStatus = "OPEN"
+	Filled    OrderStatus = "FILLED"
+	Cancelled OrderStatus = "CANCELLED"
+)
+
 type SubmitOrderRequest struct {
 	OrderID  string    `json:"order_id,omitempty"` // for deduplicate
 	ClientID string    `json:"client_id" binding:"required"`

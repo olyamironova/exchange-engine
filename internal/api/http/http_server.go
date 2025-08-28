@@ -1,6 +1,8 @@
 package http
 
 import (
+	"fmt"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"net/http"
 	"sync"
@@ -48,12 +50,22 @@ func (s *HTTPServer) submitOrder(c *gin.Context) {
 		return
 	}
 
+	if err := ValidateOrder(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	// deduplication
 	if req.OrderID != "" {
 		if _, exists := s.submittedID.LoadOrStore(req.OrderID, struct{}{}); exists {
 			c.JSON(http.StatusOK, gin.H{"message": "duplicate order", "order_id": req.OrderID})
 			return
 		}
+	}
+
+	orderID := req.OrderID
+	if orderID == "" {
+		orderID = uuid.NewString()
 	}
 
 	o := &domain.Order{
@@ -136,10 +148,11 @@ func (s *HTTPServer) getOrderbook(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+	copySnapshot := ob.DeepCopy()
 	c.JSON(http.StatusOK, dto.GetOrderbookResponse{
-		Bids:      convertOrders(ob.Bids),
-		Asks:      convertOrders(ob.Asks),
-		Timestamp: ob.Timestamp,
+		Bids:      convertOrders(copySnapshot.Bids),
+		Asks:      convertOrders(copySnapshot.Asks),
+		Timestamp: copySnapshot.Timestamp,
 	})
 }
 
@@ -211,4 +224,24 @@ func convertTrades(trades []*domain.Trade) []dto.Trade {
 
 func TimeToProto(t time.Time) *timestamppb.Timestamp {
 	return timestamppb.New(t)
+}
+
+func ValidateOrder(req *dto.SubmitOrderRequest) error {
+	switch req.Side {
+	case dto.Buy, dto.Sell:
+	default:
+		return fmt.Errorf("invalid side: %s", req.Side)
+	}
+	switch req.Type {
+	case dto.Limit, dto.Market:
+	default:
+		return fmt.Errorf("invalid order type: %s", req.Type)
+	}
+	if req.Quantity <= 0 {
+		return fmt.Errorf("quantity must be > 0")
+	}
+	if req.Type == dto.Limit && req.Price <= 0 {
+		return fmt.Errorf("price must be > 0 for LIMIT orders")
+	}
+	return nil
 }

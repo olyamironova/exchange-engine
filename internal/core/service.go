@@ -4,6 +4,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/olyamironova/exchange-engine/internal/domain"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type OrderBook struct {
 	Buy    []*domain.Order
 	Sell   []*domain.Order
 	Trades []*domain.Trade
+	mu     sync.Mutex
 }
 
 func NewOrderBook(symbol string) *OrderBook {
@@ -19,10 +21,34 @@ func NewOrderBook(symbol string) *OrderBook {
 }
 
 func (ob *OrderBook) AddOrder(o *domain.Order) []*domain.Trade {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+
+	var trades []*domain.Trade
 	if o.Type == domain.Market {
-		return ob.matchMarketOrder(o)
+		trades = ob.matchMarketOrder(o)
+	} else {
+		trades = ob.matchLimitOrder(o)
 	}
-	return ob.matchLimitOrder(o)
+
+	ob.Trades = append(ob.Trades, trades...)
+	return trades
+}
+
+func (ob *OrderBook) DeepCopy() *OrderBook {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+
+	buyCopy := append([]*domain.Order(nil), ob.Buy...)
+	sellCopy := append([]*domain.Order(nil), ob.Sell...)
+	tradesCopy := append([]*domain.Trade(nil), ob.Trades...)
+
+	return &OrderBook{
+		Symbol: ob.Symbol,
+		Buy:    buyCopy,
+		Sell:   sellCopy,
+		Trades: tradesCopy,
+	}
 }
 
 func (ob *OrderBook) matchMarketOrder(o *domain.Order) []*domain.Trade {
@@ -44,7 +70,6 @@ func (ob *OrderBook) matchMarketOrder(o *domain.Order) []*domain.Trade {
 		tradeQty := min(o.Remaining, best.Remaining)
 		tradePrice := best.Price // take the price from the limit order
 
-		// creating a trade
 		trade := &domain.Trade{
 			ID:        uuid.NewString(),
 			BuyOrder:  chooseOrderID(o, best, domain.Buy),
@@ -56,7 +81,6 @@ func (ob *OrderBook) matchMarketOrder(o *domain.Order) []*domain.Trade {
 		}
 		trades = append(trades, trade)
 
-		// update remains
 		o.Remaining -= tradeQty
 		best.Remaining -= tradeQty
 

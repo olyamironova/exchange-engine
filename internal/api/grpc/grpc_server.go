@@ -5,6 +5,7 @@ import (
 	"github.com/olyamironova/exchange-engine/internal/api/http"
 	"github.com/olyamironova/exchange-engine/internal/core"
 	"github.com/olyamironova/exchange-engine/internal/domain"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"time"
 
 	_ "github.com/olyamironova/exchange-engine/internal/core"
@@ -23,6 +24,10 @@ func NewGRPCServer(eng *core.Engine) *GRPCServer {
 }
 
 func (s *GRPCServer) SubmitOrder(ctx context.Context, req *pb.SubmitOrderRequest) (*pb.SubmitOrderResponse, error) {
+	if err := ValidateOrder(req); err != nil {
+		return nil, err
+	}
+
 	o := &domain.Order{
 		ClientID: req.ClientId,
 		Symbol:   req.Symbol,
@@ -91,7 +96,10 @@ func (s *GRPCServer) GetOrder(ctx context.Context, req *pb.GetOrderRequest) (*pb
 }
 
 func (s *GRPCServer) GetTradesForOrder(ctx context.Context, req *pb.GetTradesRequest) (*pb.GetTradesResponse, error) {
-	trades, _ := s.Eng.GetTradesForOrder(ctx, req.OrderId)
+	trades, err := s.Eng.GetTradesForOrder(ctx, req.OrderId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get trades failed: %v", err)
+	}
 	pbTrades := make([]*pb.Trade, 0, len(trades))
 	for _, t := range trades {
 		pbTrades = append(pbTrades, &pb.Trade{
@@ -111,10 +119,11 @@ func (s *GRPCServer) GetOrderbook(ctx context.Context, req *pb.GetOrderbookReque
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "symbol not found")
 	}
+	copySnapshot := ob.DeepCopy()
 	return &pb.GetOrderbookResponse{
-		Bids:      convertOrdersToPb(ob.Bids),
-		Asks:      convertOrdersToPb(ob.Asks),
-		Timestamp: time.Now().Unix(),
+		Bids:      convertOrdersToPb(copySnapshot.Bids),
+		Asks:      convertOrdersToPb(copySnapshot.Asks),
+		Timestamp: timestamppb.New(time.Now()),
 	}, nil
 }
 
@@ -161,4 +170,14 @@ func convertOrdersToPb(in []domain.Order) []*pb.Order {
 		out = append(out, convertOrderToPb(&cpy))
 	}
 	return out
+}
+
+func ValidateOrder(req *pb.SubmitOrderRequest) error {
+	if req.Side != "BUY" && req.Side != "SELL" {
+		return status.Errorf(codes.InvalidArgument, "invalid side: %s", req.Side)
+	}
+	if req.Type != "LIMIT" && req.Type != "MARKET" {
+		return status.Errorf(codes.InvalidArgument, "invalid type: %s", req.Type)
+	}
+	return nil
 }

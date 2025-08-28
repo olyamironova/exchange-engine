@@ -81,7 +81,7 @@ message GetOrderbookRequest {
 message GetOrderbookResponse {
   repeated Order bids = 1;
   repeated Order asks = 2;
-  int64 timestamp = 3;
+  google.protobuf.Timestamp timestamp = 3;
 }
 
 message SnapshotRequest {

@@ -9,7 +9,7 @@ import (
 )
 
 type Cache struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	store map[string]*domain.OrderbookSnapshot
 }
 
@@ -22,7 +22,7 @@ func NewCache() *Cache {
 func (c *Cache) SetOrderbook(ctx context.Context, symbol string, ob *domain.OrderbookSnapshot) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	copy := *ob
+	copy := deepCopySnapshot(ob)
 	c.store[symbol] = &copy
 	return nil
 }
@@ -34,6 +34,20 @@ func (c *Cache) GetOrderbook(ctx context.Context, symbol string) (*domain.Orderb
 	if !ok {
 		return nil, nil
 	}
-	copy := *ob
+	copy := deepCopySnapshot(ob)
 	return &copy, nil
+}
+
+func deepCopySnapshot(in *domain.OrderbookSnapshot) domain.OrderbookSnapshot {
+	out := *in
+	if len(in.Bids) > 0 {
+		out.Bids = append([]domain.Order(nil), in.Bids...)
+	}
+	if len(in.Asks) > 0 {
+		out.Asks = append([]domain.Order(nil), in.Asks...)
+	}
+	if len(in.Trades) > 0 {
+		out.Trades = append([]*domain.Trade(nil), in.Trades...)
+	}
+	return out
 }
