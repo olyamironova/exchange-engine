@@ -4,6 +4,7 @@ package proto;
 
 import "google/protobuf/timestamp.proto";
 
+
 option go_package = "github.com/olyamironova/exchange-engine/proto;exchange";
 
 service Exchange {
@@ -24,21 +25,21 @@ message SubmitOrderRequest {
   string symbol = 2;
   string side = 3;   // BUY/SELL
   string type = 4;   // LIMIT/MARKET
-  double price = 5;
-  double quantity = 6;
+  string price = 5;
+  string quantity = 6;
 }
 
 message SubmitOrderResponse {
   string order_id = 1;
   repeated Trade trades = 2;
-  double remaining = 3;
+  string remaining = 3;
 }
 
 message ModifyOrderRequest {
   string order_id = 1;
   string client_id = 2;
-  double new_price = 3;
-  double new_quantity = 4;
+  string new_price = 3;
+  string new_quantity = 4;
 }
 
 message ModifyOrderResponse {
@@ -108,9 +109,9 @@ message Order {
   string symbol = 3;
   string side = 4;
   string type = 5;
-  double price = 6;
-  double quantity = 7;
-  double remaining = 8;
+  string price = 6;
+  string quantity = 7;
+  string remaining = 8;
   google.protobuf.Timestamp created_at = 9;
 }
 
@@ -118,7 +119,7 @@ message Trade {
   string id = 1;
   string buy_order = 2;
   string sell_order = 3;
-  double price = 4;
-  double quantity = 5;
+  string price = 4;
+  string quantity = 5;
   google.protobuf.Timestamp timestamp = 6;
 }

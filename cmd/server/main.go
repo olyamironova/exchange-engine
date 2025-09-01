@@ -3,77 +3,39 @@ package main
 import (
 	"context"
 	"log"
-	"os"
+	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olyamironova/exchange-engine/internal/adapter/cache"
 	"github.com/olyamironova/exchange-engine/internal/adapter/pg"
+	"github.com/olyamironova/exchange-engine/internal/api/http"
 	"github.com/olyamironova/exchange-engine/internal/core"
-	"github.com/olyamironova/exchange-engine/internal/domain"
 )
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://postgres:postgres@localhost:5432/exchange?sslmode=disable"
-	}
-
 	ctx := context.Background()
-	repo, err := pg.NewPgRepo(ctx, dsn)
+	pgURL := "postgres://user:password@localhost:5432/exchange_db"
+	dbpool, err := pgxpool.New(ctx, pgURL)
 	if err != nil {
-		log.Fatal("failed to connect to db:", err)
+		log.Fatalf("failed to connect to Postgres: %v", err)
 	}
-	defer repo.Close(ctx)
+	defer dbpool.Close()
 
-	engine := core.NewEngine(repo, nil)
+	repo := pg.NewRepository(dbpool)
 
-	r := gin.Default()
+	redisCache := cache.NewRedisCache(
+		"localhost:6379",
+		"",
+		0,
+		5*time.Minute,
+	)
+	engine := core.NewEngine(repo, redisCache)
 
-	r.POST("/order", func(c *gin.Context) {
-		var req struct {
-			ClientID string  `json:"client_id"`
-			Symbol   string  `json:"symbol"`
-			Side     string  `json:"side"`
-			Type     string  `json:"type"`
-			Price    float64 `json:"price"`
-			Quantity float64 `json:"quantity"`
-		}
-		if err := c.BindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
+	server := http.NewHTTPServer(engine)
 
-		order := &domain.Order{
-			ClientID: req.ClientID,
-			Symbol:   req.Symbol,
-			Side:     domain.Side(req.Side),
-			Type:     domain.OrderType(req.Type),
-			Price:    req.Price,
-			Quantity: req.Quantity,
-		}
-
-		trades, err := engine.SubmitOrder(ctx, order)
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(200, gin.H{
-			"order_id":  order.ID,
-			"remaining": order.Remaining,
-			"trades":    trades,
-		})
-	})
-
-	r.GET("/orderbook", func(c *gin.Context) {
-		symbol := c.Query("symbol")
-		ob, err := engine.GetOrderbook(ctx, symbol)
-		if err != nil {
-			c.JSON(404, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(200, ob)
-	})
-
-	log.Println("server listening on :8080")
-	r.Run(":8080")
+	addr := ":8080"
+	log.Printf("Starting HTTP server on %s...", addr)
+	if err := server.Run(addr); err != nil {
+		log.Fatalf("HTTP server failed: %v", err)
+	}
 }

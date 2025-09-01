@@ -1,13 +1,16 @@
 package domain
 
-import "time"
+import (
+	"github.com/shopspring/decimal"
+	"time"
+)
 
 type Trade struct {
 	ID        string
 	Symbol    string
 	BuyOrder  string
 	SellOrder string
-	Price     float64
-	Quantity  float64
+	Price     decimal.Decimal
+	Quantity  decimal.Decimal
 	Timestamp time.Time
 }

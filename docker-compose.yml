@@ -36,12 +36,25 @@ services:
     networks:
       - exchange_net
 
+  redis:
+    image: redis:8
+    container_name: exchange-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - exchange_net
+
   server:
     build: .
     depends_on:
       - flyway
+      - redis
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/exchange?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
     ports:
       - "8080:8080"
     command: ["./server"]

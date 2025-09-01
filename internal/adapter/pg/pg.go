@@ -2,367 +2,312 @@ package pg
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/jackc/pgx/v5"
-	_ "time"
-
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olyamironova/exchange-engine/internal/domain"
 	"github.com/olyamironova/exchange-engine/internal/port"
+	"github.com/shopspring/decimal"
 )
 
-var _ port.Repository = (*PgRepo)(nil)
-var _ port.Tx = (*pgTx)(nil)
+type Repository struct{ db *pgxpool.Pool }
 
-var validSides = map[string]domain.Side{
-	"BUY":  domain.Buy,
-	"SELL": domain.Sell,
-}
+func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
 
-var validTypes = map[string]domain.OrderType{
-	"LIMIT":  domain.Limit,
-	"MARKET": domain.Market,
-}
-
-var validStatuses = map[string]domain.OrderStatus{
-	"OPEN":      domain.Open,
-	"FILLED":    domain.Filled,
-	"CANCELLED": domain.Cancelled,
-}
-
-type PgRepo struct {
-	pool *pgxpool.Pool
-}
-
-type pgTx struct {
-	tx pgx.Tx
-}
-
-func (p *PgRepo) BeginTx(ctx context.Context) (port.Tx, error) {
-	if p.pool == nil {
-		return nil, fmt.Errorf("pg pool nil")
-	}
-	tx, err := p.pool.Begin(ctx)
+func (r *Repository) BeginTx(ctx context.Context) (port.Tx, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return nil, err
 	}
-	return &pgTx{tx: tx}, nil
+	return &Tx{tx: tx}, nil
 }
 
-// call Close when you finish work with database.
-func NewPgRepo(ctx context.Context, dsn string) (*PgRepo, error) {
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, fmt.Errorf("pg: create pool: %w", err)
-	}
-	return &PgRepo{pool: pool}, nil
-}
-
-func (p *PgRepo) Close() {
-	if p.pool != nil {
-		p.pool.Close()
-	}
-}
-
-func (p *PgRepo) SaveOrder(ctx context.Context, o *domain.Order) error {
-	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+func (r *Repository) SaveOrder(ctx context.Context, o *domain.Order) error {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
-	}
-	defer func(tx pgx.Tx, ctx context.Context) {
-		err := tx.Rollback(ctx)
-		if err != nil {
-
-		}
-	}(tx, ctx)
-
-	if o == nil {
-		return errors.New("nil order")
-	}
-	_, err = tx.Exec(ctx, `
-INSERT INTO orders(id, client_id, client_order_id, symbol, side, type, price, quantity, remaining, status, created_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-ON CONFLICT (id) DO UPDATE SET
-  client_id = EXCLUDED.client_id,
-  client_order_id = EXCLUDED.client_order_id,
-  symbol = EXCLUDED.symbol,
-  side = EXCLUDED.side,
-  type = EXCLUDED.type,
-  price = EXCLUDED.price,
-  quantity = EXCLUDED.quantity,
-  remaining = EXCLUDED.remaining,
-  status = EXCLUDED.status,
-  created_at = EXCLUDED.created_at
-`, o.ID, o.ClientID, o.ClientOrderID, o.Symbol, string(o.Side), string(o.Type),
-		o.Price, o.Quantity, o.Remaining, string(o.Status), o.CreatedAt)
-	if err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-func (t *pgTx) SaveOrder(ctx context.Context, o *domain.Order) error {
-	_, err := t.tx.Exec(ctx, `
-INSERT INTO orders(id, client_id, client_order_id, symbol, side, type, price, quantity, remaining, status, created_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-ON CONFLICT (id) DO UPDATE SET
-  client_id = EXCLUDED.client_id,
-  client_order_id = EXCLUDED.client_order_id,
-  symbol = EXCLUDED.symbol,
-  side = EXCLUDED.side,
-  type = EXCLUDED.type,
-  price = EXCLUDED.price,
-  quantity = EXCLUDED.quantity,
-  remaining = EXCLUDED.remaining,
-  status = EXCLUDED.status,
-  created_at = EXCLUDED.created_at
-`, o.ID, o.ClientID, o.ClientOrderID, o.Symbol, string(o.Side), string(o.Type),
-		o.Price, o.Quantity, o.Remaining, string(o.Status), o.CreatedAt)
-	return err
-}
-
-func (p *PgRepo) SaveTrade(ctx context.Context, t *domain.Trade) error {
-	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer func(tx pgx.Tx, ctx context.Context) {
-		err := tx.Rollback(ctx)
-		if err != nil {
-
-		}
-	}(tx, ctx)
-
-	if t == nil {
-		return errors.New("nil trade")
-	}
-	_, err = p.pool.Exec(ctx, `
-INSERT INTO trades(id, buy_order, sell_order, price, quantity, timestamp)
-VALUES($1,$2,$3,$4,$5,$6)
-ON CONFLICT (id) DO NOTHING
-`, t.ID, t.BuyOrder, t.SellOrder, t.Price, t.Quantity, t.Timestamp)
-	if err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-func (t *pgTx) SaveTrade(ctx context.Context, tr *domain.Trade) error {
-	_, err := t.tx.Exec(ctx, `INSERT INTO trades(id, symbol, buy_order, sell_order, price, quantity, timestamp)
-		VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
-		tr.ID, tr.Symbol, tr.BuyOrder, tr.SellOrder, tr.Price, tr.Quantity, tr.Timestamp)
-	return err
-}
-
-// LoadOpenOrders returns open orders for a symbol ordered by created_at ASC (FIFO)
-func (p *PgRepo) LoadOpenOrders(ctx context.Context, symbol string) ([]*domain.Order, error) {
-	rows, err := p.pool.Query(ctx, `
-SELECT id, client_id, client_order_id, symbol, side, type, price, quantity, remaining, status, created_at
-FROM orders
-WHERE symbol = $1 AND COALESCE(remaining,0) > 0 AND status = 'OPEN'
-ORDER BY created_at ASC
-`, symbol)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var res []*domain.Order
-	for rows.Next() {
-		var o domain.Order
-		var side, orderType, status string
-		if err := rows.Scan(&o.ID, &o.ClientID, &o.ClientOrderID, &o.Symbol,
-			&side, &orderType, &o.Price, &o.Quantity, &o.Remaining,
-			&status, &o.CreatedAt); err != nil {
-			return nil, err
-		}
-		// validate
-		s, ok := validSides[side]
-		if !ok {
-			return nil, fmt.Errorf("pg: invalid side value %q", side)
-		}
-		t, ok := validTypes[orderType]
-		if !ok {
-			return nil, fmt.Errorf("pg: invalid type value %q", orderType)
-		}
-		st, ok := validStatuses[status]
-		if !ok {
-			return nil, fmt.Errorf("pg: invalid status value %q", status)
-		}
-		o.Side, o.Type, o.Status = s, t, st
-		res = append(res, &o)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error in load: %w", err)
-	}
-	return res, nil
-}
-
-// CancelOrder marks an order as cancelled if it's still open
-func (p *PgRepo) CancelOrder(ctx context.Context, orderID, clientID string) error {
-	res, err := p.pool.Exec(ctx, `
-UPDATE orders
-SET remaining = 0, status = 'CANCELLED'
-WHERE id = $1 AND client_id = $2 AND COALESCE(remaining,0) > 0 AND status = 'OPEN'
-`, orderID, clientID)
-	if err != nil {
-		return err
-	}
-	if res.RowsAffected() == 0 {
-		return errors.New("order not found or already closed")
-	}
-	return nil
-}
-
-func (t *pgTx) CancelOrder(ctx context.Context, orderID, clientID string) error {
-	_, err := t.tx.Exec(ctx, `UPDATE orders SET remaining=0, status='CANCELLED'
-		WHERE id=$1 AND client_id=$2 AND COALESCE(remaining,0) > 0 AND status='OPEN'`, orderID, clientID)
-	return err
-}
-
-// ModifyOrder updates price/quantity/remaining for an open order
-func (p *PgRepo) ModifyOrder(ctx context.Context, orderID, clientID string, price, qty float64) error {
-	res, err := p.pool.Exec(ctx, `
-UPDATE orders
-SET price = $1, quantity = $2, remaining = $2
-WHERE id = $3 AND client_id = $4 AND COALESCE(remaining,0) > 0 AND status = 'OPEN'
-`, price, qty, orderID, clientID)
-	if err != nil {
-		return err
-	}
-	if res.RowsAffected() == 0 {
-		return errors.New("order not found or already closed")
-	}
-	return nil
-}
-
-func (t *pgTx) ModifyOrder(ctx context.Context, orderID, clientID string, price, qty float64) error {
-	_, err := t.tx.Exec(ctx, `UPDATE orders SET price=$1, quantity=$2, remaining=$2
-		WHERE id=$3 AND client_id=$4 AND COALESCE(remaining,0) > 0 AND status='OPEN'`,
-		price, qty, orderID, clientID)
-	return err
-}
-
-// SaveSnapshot persists orderbook snapshot as JSONB
-func (p *PgRepo) SaveSnapshot(ctx context.Context, snapshotID, symbol string, ob *domain.OrderbookSnapshot) error {
-	if ob == nil {
-		return errors.New("nil snapshot")
-	}
-	b, err := json.Marshal(ob)
-	if err != nil {
-		return err
-	}
-	_, err = p.pool.Exec(ctx, `
-INSERT INTO orderbook_snapshots(id, symbol, snapshot_json, created_at)
-VALUES($1,$2,$3,NOW())
-ON CONFLICT (id) DO UPDATE SET snapshot_json = EXCLUDED.snapshot_json, created_at = NOW()
-`, snapshotID, symbol, string(b))
-	return err
-}
-
-func (t *pgTx) SaveSnapshot(ctx context.Context, id, symbol string, ob *domain.OrderbookSnapshot) error {
-	// same as SaveSnapshot in PgRepo but using t.tx
-	b, err := json.Marshal(ob)
-	if err != nil {
-		return err
-	}
-	_, err = t.tx.Exec(ctx, `INSERT INTO orderbook_snapshots(id, symbol, snapshot_json, created_at)
-		VALUES($1,$2,$3,NOW()) ON CONFLICT (id) DO UPDATE SET snapshot_json = EXCLUDED.snapshot_json, created_at = NOW()`,
-		id, symbol, string(b))
-	return err
-}
-
-func (t *pgTx) Commit(ctx context.Context) error {
-	return t.tx.Commit(ctx)
-}
-func (t *pgTx) Rollback(ctx context.Context) error {
-	return t.tx.Rollback(ctx)
-}
-func (p *PgRepo) SaveOrderAndTradeTx(ctx context.Context, o *domain.Order, t *domain.Trade) error {
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("pg: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	if err := p.saveOrderTx(ctx, tx, o); err != nil {
+	t := &Tx{tx: tx}
+	if err := t.SaveOrder(ctx, o); err != nil {
 		return err
 	}
-	if err := p.saveTradeTx(ctx, tx, t); err != nil {
+	return tx.Commit(ctx)
+}
+
+func (r *Repository) SaveTrade(ctx context.Context, t *domain.Trade) error {
+	_, err := r.db.Exec(ctx, `
+		insert into trades (id, symbol, buy_order, sell_order, price, quantity, executed_at)
+		values ($1,$2,$3,$4,$5,$6,$7)
+	`, t.ID, t.Symbol, t.BuyOrder, t.SellOrder, t.Price, t.Quantity, t.Timestamp)
+	return err
+}
+
+func (r *Repository) LoadOpenOrders(ctx context.Context, symbol string) ([]*domain.Order, error) {
+	rows, err := r.db.Query(ctx, `
+		select id, client_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at
+		from orders
+		where symbol=$1 and status='OPEN'
+		order by created_at asc
+	`, symbol)
+	if err != nil {
+		return nil, err
+	}
+	return collectOrders(rows)
+}
+
+func (r *Repository) CancelOrder(ctx context.Context, orderID, clientID string) error {
+	cmd, err := r.db.Exec(ctx, `
+		update orders set status='CANCELLED', remaining=0
+		where id=$1 and client_id=$2 and status='OPEN'
+	`, orderID, clientID)
+	if err != nil {
 		return err
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("pg: commit tx: %w", err)
+	if cmd.RowsAffected() == 0 {
+		return errors.New("order not found or not OPEN")
 	}
 	return nil
 }
 
-func (p *PgRepo) saveOrderTx(ctx context.Context, tx pgx.Tx, o *domain.Order) error {
-	_, err := tx.Exec(ctx, `
-INSERT INTO orders(
-  id, client_id, client_order_id, symbol, side, type, price, quantity, remaining, status, created_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-ON CONFLICT (id) DO UPDATE SET
-  client_id = EXCLUDED.client_id,
-  client_order_id = EXCLUDED.client_order_id,
-  symbol = EXCLUDED.symbol,
-  side = EXCLUDED.side,
-  type = EXCLUDED.type,
-  price = EXCLUDED.price,
-  quantity = EXCLUDED.quantity,
-  remaining = EXCLUDED.remaining,
-  status = EXCLUDED.status,
-  created_at = EXCLUDED.created_at
-`, o.ID, o.ClientID, o.ClientOrderID, o.Symbol, string(o.Side), string(o.Type),
-		o.Price, o.Quantity, o.Remaining, string(o.Status), o.CreatedAt)
+func (r *Repository) ModifyOrder(ctx context.Context, orderID, clientID string, price, qty decimal.Decimal) error {
+	cmd, err := r.db.Exec(ctx, `
+		update orders set price=$3, quantity=$4, remaining=$4, status='OPEN'
+		where id=$1 and client_id=$2 and status='OPEN'
+	`, orderID, clientID, price, qty)
 	if err != nil {
-		return fmt.Errorf("pg: saveOrderTx: %w", err)
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return errors.New("order not found or not OPEN")
 	}
 	return nil
 }
 
-func (p *PgRepo) saveTradeTx(ctx context.Context, tx pgx.Tx, t *domain.Trade) error {
-	_, err := tx.Exec(ctx, `
-INSERT INTO trades(id, buy_order, sell_order, price, quantity, timestamp)
-VALUES ($1,$2,$3,$4,$5,$6)
-ON CONFLICT (id) DO NOTHING
-`, t.ID, t.BuyOrder, t.SellOrder, t.Price, t.Quantity, t.Timestamp)
+func (r *Repository) LoadSnapshot(ctx context.Context, symbol string) (*domain.OrderbookSnapshot, error) {
+	orders, err := r.LoadOpenOrders(ctx, symbol)
 	if err != nil {
-		return fmt.Errorf("pg: saveTradeTx: %w", err)
-	}
-	return nil
-}
-
-// LoadSnapshot loads snapshot JSONB and unmarshals
-func (p *PgRepo) LoadSnapshot(ctx context.Context, snapshotID string) (*domain.OrderbookSnapshot, error) {
-	var data string
-	if err := p.pool.QueryRow(ctx, `SELECT snapshot_json FROM orderbook_snapshots WHERE id = $1`, snapshotID).Scan(&data); err != nil {
 		return nil, err
 	}
-	var ob domain.OrderbookSnapshot
-	if err := json.Unmarshal([]byte(data), &ob); err != nil {
-		return nil, err
+	var bids, asks []domain.Order
+	for _, o := range orders {
+		if o.Side == domain.Buy {
+			bids = append(bids, *o)
+		} else {
+			asks = append(asks, *o)
+		}
 	}
-	return &ob, nil
+	return &domain.OrderbookSnapshot{
+		Symbol: symbol,
+		Bids:   bids,
+		Asks:   asks,
+	}, nil
 }
 
-// ListSymbols returns distinct symbols present in orders table
-func (p *PgRepo) ListSymbols(ctx context.Context) ([]string, error) {
-	rows, err := p.pool.Query(ctx, `SELECT DISTINCT symbol FROM orders`)
+func (r *Repository) LoadOrderByIDForClient(ctx context.Context, orderID, clientID string) (*domain.Order, error) {
+	row := r.db.QueryRow(ctx, `
+		select id, client_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at
+		from orders
+		where id=$1 and client_id=$2
+	`, orderID, clientID)
+	return scanOrder(row)
+}
+
+// returns best bid/ask
+func (r *Repository) LoadTopOfBook(ctx context.Context, symbol string) (*domain.OrderbookSnapshot, error) {
+	rowBid := r.db.QueryRow(ctx, `
+		select id, client_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at
+		from orders
+		where symbol=$1 and side='BUY' and status='OPEN'
+		order by price desc, created_at asc
+		limit 1
+	`, symbol)
+	rowAsk := r.db.QueryRow(ctx, `
+		select id, client_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at
+		from orders
+		where symbol=$1 and side='SELL' and status='OPEN'
+		order by price asc, created_at asc
+		limit 1
+	`, symbol)
+
+	bid, _ := scanOrder(rowBid)
+	ask, _ := scanOrder(rowAsk)
+
+	var bids, asks []domain.Order
+	if bid != nil {
+		bids = append(bids, *bid)
+	}
+	if ask != nil {
+		asks = append(asks, *ask)
+	}
+
+	return &domain.OrderbookSnapshot{
+		Symbol: symbol,
+		Bids:   bids,
+		Asks:   asks,
+	}, nil
+}
+
+type Tx struct{ tx pgx.Tx }
+
+func (t *Tx) Commit(ctx context.Context) error   { return t.tx.Commit(ctx) }
+func (t *Tx) Rollback(ctx context.Context) error { return t.tx.Rollback(ctx) }
+
+func scanOrder(row pgx.Row) (*domain.Order, error) {
+	var o domain.Order
+	err := row.Scan(&o.ID, &o.ClientID, &o.Symbol, &o.Side, &o.Type, &o.Price, &o.Quantity, &o.Remaining, &o.Status, &o.CreatedAt, &o.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+func (t *Tx) LoadOrderByIDForClient(ctx context.Context, orderID, clientID string) (*domain.Order, error) {
+	row := t.tx.QueryRow(ctx, `
+    select id, client_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at
+    from orders where id=$1 and client_id=$2 for update`, orderID, clientID)
+	return scanOrder(row)
+}
+
+// candidates for glass-lock matching
+func (t *Tx) LoadCandidatesForMatch(ctx context.Context, symbol string, side domain.Side, limitPrice *decimal.Decimal, limit int) ([]*domain.Order, error) {
+	// buyer matches the ASK (sales) in ascending order of price
+	if side == domain.Buy {
+		if limitPrice != nil {
+			rows, err := t.tx.Query(ctx, `
+        select id, client_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at
+        from orders
+        where symbol=$1 and side='SELL' and status='OPEN' and price <= $2
+        order by price asc, created_at asc
+        for update skip locked
+        limit $3
+      `, symbol, limitPrice, limit)
+			if err != nil {
+				return nil, err
+			}
+			return collectOrders(rows)
+		}
+		rows, err := t.tx.Query(ctx, `
+      select ... from orders
+      where symbol=$1 and side='SELL' and status='OPEN'
+      order by price asc, created_at asc
+      for update skip locked
+      limit $2
+    `, symbol, limit)
+		if err != nil {
+			return nil, err
+		}
+		return collectOrders(rows)
+	}
+	// for the seller, we select the BID in descending order of price
+	if limitPrice != nil {
+		rows, err := t.tx.Query(ctx, `
+      select ... from orders
+      where symbol=$1 and side='BUY' and status='OPEN' and price >= $2
+      order by price desc, created_at asc
+      for update skip locked
+      limit $3
+    `, symbol, limitPrice, limit)
+		if err != nil {
+			return nil, err
+		}
+		return collectOrders(rows)
+	}
+	rows, err := t.tx.Query(ctx, `
+    select ... from orders
+    where symbol=$1 and side='BUY' and status='OPEN'
+    order by price desc, created_at asc
+    for update skip locked
+    limit $2
+  `, symbol, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collectOrders(rows)
+}
+
+func collectOrders(rows pgx.Rows) ([]*domain.Order, error) {
+	defer rows.Close()
+	out := make([]*domain.Order, 0, 64)
+	for rows.Next() {
+		var o domain.Order
+		if err := rows.Scan(&o.ID, &o.ClientID, &o.Symbol, &o.Side, &o.Type, &o.Price, &o.Quantity, &o.Remaining, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &o)
+	}
+	return out, rows.Err()
+}
+
+func (t *Tx) SaveOrder(ctx context.Context, o *domain.Order) error {
+	_, err := t.tx.Exec(ctx, `
+    insert into orders (id, client_id, symbol, side, type, price, quantity, remaining, status, created_at, updated_at)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+    on conflict (id) do update set
+      price=excluded.price, quantity=excluded.quantity, remaining=excluded.remaining, status=excluded.status, updated_at=excluded.updated_at
+  `, o.ID, o.ClientID, o.Symbol, o.Side, o.Type, o.Price, o.Quantity, o.Remaining, o.Status, o.CreatedAt)
+	return err
+}
+
+func (t *Tx) SaveTrade(ctx context.Context, tr *domain.Trade) error {
+	_, err := t.tx.Exec(ctx, `
+    insert into trades (id, symbol, buy_order, sell_order, price, quantity, executed_at)
+    values ($1,$2,$3,$4,$5,$6,$7)
+  `, tr.ID, tr.Symbol, tr.BuyOrder, tr.SellOrder, tr.Price, tr.Quantity, tr.Timestamp)
+	return err
+}
+
+func (t *Tx) ModifyOrder(ctx context.Context, orderID, clientID string, price, qty *decimal.Decimal) error {
+	if price == nil || qty == nil {
+		return errors.New("price and qty must not be nil")
+	}
+	cmd, err := t.tx.Exec(ctx, `
+    update orders set price=$3, quantity=$4, remaining=$4, status='OPEN'
+    where id=$1 and client_id=$2 and status='OPEN'
+  `, orderID, clientID, price, qty)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return errors.New("order not found or not OPEN")
+	}
+	return nil
+}
+
+func (t *Tx) CancelOrder(ctx context.Context, orderID, clientID string) error {
+	cmd, err := t.tx.Exec(ctx, `
+    update orders set status='CANCELLED', remaining=0
+    where id=$1 and client_id=$2 and status='OPEN'
+  `, orderID, clientID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return errors.New("order not found or not OPEN")
+	}
+	return nil
+}
+
+func (r *Repository) LoadTradesForOrder(ctx context.Context, orderID string) ([]*domain.Trade, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, symbol, buy_order, sell_order, price, quantity, executed_at
+		FROM trades
+		WHERE buy_order = $1 OR sell_order = $1
+		ORDER BY executed_at ASC
+	`, orderID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var res []string
+
+	var trades []*domain.Trade
 	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
+		var t domain.Trade
+		if err := rows.Scan(&t.ID, &t.Symbol, &t.BuyOrder, &t.SellOrder, &t.Price, &t.Quantity, &t.Timestamp); err != nil {
 			return nil, err
 		}
-		res = append(res, s)
+		trades = append(trades, &t)
 	}
-	return res, nil
+	return trades, rows.Err()
 }

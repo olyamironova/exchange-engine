@@ -3,7 +3,6 @@ package http
 import (
 	"fmt"
 	"github.com/google/uuid"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"net/http"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/olyamironova/exchange-engine/internal/core"
 	"github.com/olyamironova/exchange-engine/internal/domain"
 	"github.com/olyamironova/exchange-engine/internal/middleware"
+	"github.com/shopspring/decimal"
 )
 
 type HTTPServer struct {
@@ -27,15 +27,12 @@ func NewHTTPServer(eng *core.Engine) *HTTPServer {
 func (s *HTTPServer) Run(addr string) error {
 	r := gin.Default()
 
-	// Middleware rate-limiting
 	rl := middleware.NewRateLimiter(time.Millisecond * 100)
 	r.Use(rl.Middleware())
 
 	r.POST("/orders", s.submitOrder)
 	r.POST("/orders/modify", s.modifyOrder)
 	r.POST("/orders/cancel", s.cancelOrder)
-	r.GET("/orders/:id", s.getOrder)
-	r.GET("/orders/:id/trades", s.getTrades)
 	r.GET("/orderbook", s.getOrderbook)
 	r.POST("/orderbook/snapshot", s.snapshotOrderbook)
 	r.POST("/orderbook/restore", s.restoreOrderbook)
@@ -97,14 +94,13 @@ func (s *HTTPServer) modifyOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	ok, err := s.Eng.ModifyOrder(c, req.OrderID, req.ClientID, req.NewPrice, req.NewQty)
-	if err != nil {
+	if err := s.Eng.ModifyOrder(c, req.OrderID, req.ClientID, req.NewPrice, req.NewQty); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, dto.ModifyOrderResponse{
 		OrderID:  req.OrderID,
-		Modified: ok,
+		Modified: true,
 	})
 }
 
@@ -126,20 +122,26 @@ func (s *HTTPServer) cancelOrder(c *gin.Context) {
 }
 
 func (s *HTTPServer) getOrder(c *gin.Context) {
-	id := c.Param("id")
-	o, err := s.Eng.GetOrder(c, id)
+	symbol := c.Query("symbol")
+	ob, err := s.Eng.GetOrderbook(c.Request.Context(), symbol)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, dto.GetOrderResponse{Order: convertOrder(o)})
+	copySnapshot := ob.DeepCopy()
+	c.JSON(http.StatusOK, dto.GetOrderbookResponse{
+		Bids:      convertOrders(copySnapshot.Bids),
+		Asks:      convertOrders(copySnapshot.Asks),
+		Timestamp: copySnapshot.Timestamp,
+	})
 }
 
+/*
 func (s *HTTPServer) getTrades(c *gin.Context) {
 	id := c.Param("id")
 	trades, _ := s.Eng.GetTradesForOrder(c.Request.Context(), id)
 	c.JSON(http.StatusOK, dto.GetTradesResponse{Trades: convertTrades(trades)})
-}
+}*/
 
 func (s *HTTPServer) getOrderbook(c *gin.Context) {
 	symbol := c.Query("symbol")
@@ -201,8 +203,8 @@ func convertOrder(o *domain.Order) dto.Order {
 
 func convertOrders(orders []domain.Order) []dto.Order {
 	res := make([]dto.Order, len(orders))
-	for i, o := range orders {
-		res[i] = convertOrder(&o)
+	for i := range orders {
+		res[i] = convertOrder(&orders[i])
 	}
 	return res
 }
@@ -222,10 +224,6 @@ func convertTrades(trades []*domain.Trade) []dto.Trade {
 	return res
 }
 
-func TimeToProto(t time.Time) *timestamppb.Timestamp {
-	return timestamppb.New(t)
-}
-
 func ValidateOrder(req *dto.SubmitOrderRequest) error {
 	switch req.Side {
 	case dto.Buy, dto.Sell:
@@ -237,10 +235,10 @@ func ValidateOrder(req *dto.SubmitOrderRequest) error {
 	default:
 		return fmt.Errorf("invalid order type: %s", req.Type)
 	}
-	if req.Quantity <= 0 {
+	if req.Quantity.LessThanOrEqual(decimal.Zero) {
 		return fmt.Errorf("quantity must be > 0")
 	}
-	if req.Type == dto.Limit && req.Price <= 0 {
+	if req.Type == dto.Limit && req.Price.LessThanOrEqual(decimal.Zero) {
 		return fmt.Errorf("price must be > 0 for LIMIT orders")
 	}
 	return nil

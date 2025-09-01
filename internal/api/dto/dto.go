@@ -1,6 +1,9 @@
 package dto
 
-import "time"
+import (
+	"github.com/shopspring/decimal"
+	"time"
+)
 
 type OrderType string
 
@@ -25,27 +28,27 @@ const (
 )
 
 type SubmitOrderRequest struct {
-	OrderID  string    `json:"order_id,omitempty"` // for deduplicate
-	ClientID string    `json:"client_id" binding:"required"`
-	Symbol   string    `json:"symbol" binding:"required"`
-	Side     Side      `json:"side" binding:"required"`
-	Type     OrderType `json:"type" binding:"required"`
-	Price    float64   `json:"price,omitempty"` // for limited order
-	Quantity float64   `json:"quantity" binding:"required"`
+	OrderID  string          `json:"order_id,omitempty"` // for deduplicate
+	ClientID string          `json:"client_id" binding:"required"`
+	Symbol   string          `json:"symbol" binding:"required"`
+	Side     Side            `json:"side" binding:"required"`
+	Type     OrderType       `json:"type" binding:"required"`
+	Price    decimal.Decimal `json:"price,omitempty"` // for limited order
+	Quantity decimal.Decimal `json:"quantity" binding:"required"`
 }
 
 type SubmitOrderResponse struct {
-	OrderID   string  `json:"order_id"`
-	Trades    []Trade `json:"trades"`
-	Remaining float64 `json:"remaining"`
-	Message   string  `json:"message,omitempty"`
+	OrderID   string          `json:"order_id"`
+	Trades    []Trade         `json:"trades"`
+	Remaining decimal.Decimal `json:"remaining"`
+	Message   string          `json:"message,omitempty"`
 }
 
 type ModifyOrderRequest struct {
-	OrderID  string  `json:"order_id" binding:"required"`
-	ClientID string  `json:"client_id" binding:"required"`
-	NewPrice float64 `json:"new_price,omitempty"`
-	NewQty   float64 `json:"new_qty,omitempty"`
+	OrderID  string          `json:"order_id" binding:"required"`
+	ClientID string          `json:"client_id" binding:"required"`
+	NewPrice decimal.Decimal `json:"new_price,omitempty"`
+	NewQty   decimal.Decimal `json:"new_qty,omitempty"`
 }
 
 type ModifyOrderResponse struct {
@@ -109,25 +112,24 @@ type RestoreResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-// Core DTO
 type Order struct {
-	ID        string    `json:"id"`
-	ClientID  string    `json:"client_id"`
-	Symbol    string    `json:"symbol"`
-	Side      Side      `json:"side"`
-	Type      OrderType `json:"type"`
-	Price     float64   `json:"price"`
-	Quantity  float64   `json:"quantity"`
-	Remaining float64   `json:"remaining"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string          `json:"id"`
+	ClientID  string          `json:"client_id"`
+	Symbol    string          `json:"symbol"`
+	Side      Side            `json:"side"`
+	Type      OrderType       `json:"type"`
+	Price     decimal.Decimal `json:"price"`
+	Quantity  decimal.Decimal `json:"quantity"`
+	Remaining decimal.Decimal `json:"remaining"`
+	Status    string          `json:"status"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 type Trade struct {
-	ID        string    `json:"id"`
-	BuyOrder  string    `json:"buy_order"`
-	SellOrder string    `json:"sell_order"`
-	Price     float64   `json:"price"`
-	Quantity  float64   `json:"quantity"`
-	Timestamp time.Time `json:"timestamp"`
+	ID        string          `json:"id"`
+	BuyOrder  string          `json:"buy_order"`
+	SellOrder string          `json:"sell_order"`
+	Price     decimal.Decimal `json:"price"`
+	Quantity  decimal.Decimal `json:"quantity"`
+	Timestamp time.Time       `json:"timestamp"`
 }

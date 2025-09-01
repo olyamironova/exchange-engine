@@ -2,9 +2,9 @@ package grpc
 
 import (
 	"context"
-	"github.com/olyamironova/exchange-engine/internal/api/http"
 	"github.com/olyamironova/exchange-engine/internal/core"
 	"github.com/olyamironova/exchange-engine/internal/domain"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"time"
 
@@ -15,8 +15,8 @@ import (
 )
 
 type GRPCServer struct {
-	pb.UnimplementedExchangeServer // must embed for forward compatibility
-	Eng                            *core.Engine
+	pb.UnimplementedExchangeServer
+	Eng *core.Engine
 }
 
 func NewGRPCServer(eng *core.Engine) *GRPCServer {
@@ -28,13 +28,22 @@ func (s *GRPCServer) SubmitOrder(ctx context.Context, req *pb.SubmitOrderRequest
 		return nil, err
 	}
 
+	price, err := decimal.NewFromString(req.Price)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid price: %v", err)
+	}
+	quantity, err := decimal.NewFromString(req.Quantity)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid quantity: %v", err)
+	}
+
 	o := &domain.Order{
 		ClientID: req.ClientId,
 		Symbol:   req.Symbol,
 		Side:     domain.Side(req.Side),
 		Type:     domain.OrderType(req.Type),
-		Price:    req.Price,
-		Quantity: req.Quantity,
+		Price:    price,
+		Quantity: quantity,
 	}
 
 	trades, err := s.Eng.SubmitOrder(ctx, o)
@@ -48,27 +57,35 @@ func (s *GRPCServer) SubmitOrder(ctx context.Context, req *pb.SubmitOrderRequest
 			Id:        t.ID,
 			BuyOrder:  t.BuyOrder,
 			SellOrder: t.SellOrder,
-			Price:     t.Price,
-			Quantity:  t.Quantity,
-			Timestamp: http.TimeToProto(t.Timestamp),
+			Price:     t.Price.String(),
+			Quantity:  t.Quantity.String(),
+			Timestamp: TimeToProto(t.Timestamp),
 		})
 	}
 
 	return &pb.SubmitOrderResponse{
 		OrderId:   o.ID,
 		Trades:    pbTrades,
-		Remaining: o.Remaining,
+		Remaining: o.Remaining.String(),
 	}, nil
 }
 
 func (s *GRPCServer) ModifyOrder(ctx context.Context, req *pb.ModifyOrderRequest) (*pb.ModifyOrderResponse, error) {
-	ok, err := s.Eng.ModifyOrder(ctx, req.OrderId, req.ClientId, req.NewPrice, req.NewQuantity)
+	price, err := decimal.NewFromString(req.NewPrice)
 	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid new_price: %v", err)
+	}
+	quantity, err := decimal.NewFromString(req.NewQuantity)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid new_quantity: %v", err)
+	}
+
+	if err := s.Eng.ModifyOrder(ctx, req.OrderId, req.ClientId, price, quantity); err != nil {
 		return nil, status.Errorf(codes.Internal, "modify failed: %v", err)
 	}
 	return &pb.ModifyOrderResponse{
 		OrderId:  req.OrderId,
-		Modified: ok,
+		Modified: true,
 		Message:  "",
 	}, nil
 }
@@ -106,9 +123,9 @@ func (s *GRPCServer) GetTradesForOrder(ctx context.Context, req *pb.GetTradesReq
 			Id:        t.ID,
 			BuyOrder:  t.BuyOrder,
 			SellOrder: t.SellOrder,
-			Price:     t.Price,
-			Quantity:  t.Quantity,
-			Timestamp: http.TimeToProto(t.Timestamp),
+			Price:     t.Price.String(),
+			Quantity:  t.Quantity.String(),
+			Timestamp: TimeToProto(t.Timestamp),
 		})
 	}
 	return &pb.GetTradesResponse{Trades: pbTrades}, nil
@@ -156,10 +173,10 @@ func convertOrderToPb(o *domain.Order) *pb.Order {
 		Symbol:    o.Symbol,
 		Side:      string(o.Side),
 		Type:      string(o.Type),
-		Price:     o.Price,
-		Quantity:  o.Quantity,
-		Remaining: o.Remaining,
-		CreatedAt: http.TimeToProto(o.CreatedAt),
+		Price:     o.Price.String(),
+		Quantity:  o.Quantity.String(),
+		Remaining: o.Remaining.String(),
+		CreatedAt: TimeToProto(o.CreatedAt),
 	}
 }
 
@@ -181,3 +198,5 @@ func ValidateOrder(req *pb.SubmitOrderRequest) error {
 	}
 	return nil
 }
+
+func TimeToProto(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t) }

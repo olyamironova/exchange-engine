@@ -2,420 +2,313 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"sort"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/olyamironova/exchange-engine/internal/domain"
 	"github.com/olyamironova/exchange-engine/internal/port"
+	"github.com/shopspring/decimal"
 )
 
 // Engine implements business logic (matching, submit, cancel, modify, snapshot)
 type Engine struct {
 	repo  port.Repository
 	cache port.Cache
-
-	mu        sync.Mutex
-	orders    map[string]*domain.Order
-	trades    map[string][]*domain.Trade
-	orderbook map[string]*domain.OrderbookSnapshot
-	snapshots map[string]*domain.OrderbookSnapshot
 }
 
 func NewEngine(repo port.Repository, cache port.Cache) *Engine {
 	return &Engine{
-		repo:      repo,
-		cache:     cache,
-		orders:    make(map[string]*domain.Order),
-		trades:    make(map[string][]*domain.Trade),
-		orderbook: make(map[string]*domain.OrderbookSnapshot),
-		snapshots: make(map[string]*domain.OrderbookSnapshot),
+		repo:  repo,
+		cache: cache,
 	}
 }
 
-// LoadOpenOrdersFromRepo loads open orders into memory (used on startup)
-func (e *Engine) LoadOpenOrdersFromRepo(ctx context.Context, symbols []string) error {
-	if e.repo == nil {
-		return nil
+func validateOrder(o *domain.Order) error {
+	if o.Type == domain.Limit && o.Price.LessThanOrEqual(decimal.Zero) {
+		return errors.New("limit price must be > 0")
 	}
-	for _, s := range symbols {
-		orders, err := e.repo.LoadOpenOrders(ctx, s)
-		if err != nil {
-			return err
-		}
-		ob := e.getOrCreateOrderbook(s)
-		for _, o := range orders {
-			e.orders[o.ID] = o
-			if o.Side == domain.Buy {
-				ob.Bids = append(ob.Bids, *o)
-			} else {
-				ob.Asks = append(ob.Asks, *o)
-			}
-		}
-	}
-	// ensure orderbook sorted
-	for _, ob := range e.orderbook {
-		sortOrders(ob)
+	if o.Quantity.LessThanOrEqual(decimal.Zero) {
+		return errors.New("quantity must be > 0")
 	}
 	return nil
 }
 
-// SubmitOrder processes order, runs matching, persists and publishes events
+func updateOrderStatus(o *domain.Order) {
+	switch {
+	case o.Remaining.IsZero():
+		o.Status = domain.Filled
+	case o.Remaining.LessThan(o.Quantity):
+		o.Status = domain.PartiallyFilled
+	default:
+		o.Status = domain.Open
+	}
+}
 func (e *Engine) SubmitOrder(ctx context.Context, o *domain.Order) ([]*domain.Trade, error) {
-	e.mu.Lock()
-
 	if o.ID == "" {
 		o.ID = uuid.New().String()
 	}
-	o.Remaining = o.Quantity
+	o.CreatedAt = time.Now().UTC()
 	o.Status = domain.Open
-	o.CreatedAt = time.Now()
-	e.orders[o.ID] = o
+	o.Remaining = o.Quantity
 
-	ob := e.getOrCreateOrderbook(o.Symbol)
-	if o.Side == domain.Buy {
-		ob.Bids = append(ob.Bids, *o)
-	} else {
-		ob.Asks = append(ob.Asks, *o)
+	if err := validateOrder(o); err != nil {
+		return nil, err
 	}
-	sortOrders(ob)
-
-	defer e.mu.Unlock()
 
 	var executed []*domain.Trade
-
-	var tx port.Tx
-	if e.repo != nil {
-		txx, err := e.repo.BeginTx(ctx)
-		if err == nil && txx != nil {
-			tx = txx
-			defer func() {
-				if tx != nil {
-					if err != nil {
-						_ = tx.Rollback(ctx)
-					} else {
-						if cerr := tx.Commit(ctx); cerr != nil {
-							err = cerr
-						}
-					}
-				}
-			}()
-		}
-	}
-
-	if o.Side == domain.Buy {
-		asks := ob.Asks // slice of values, but we use map pointers by id
-		for i := 0; i < len(asks) && o.Remaining > 0; i++ {
-			otherPtr, ok := e.orders[asks[i].ID]
-			if !ok || otherPtr.Status != domain.Open {
-				continue
-			}
-			// price check: market orders match any; limit orders must satisfy price
-			if !(o.Type == domain.Market || o.Price >= otherPtr.Price) {
-				// remaining asks are too expensive
-				break
-			}
-			q := min(o.Remaining, otherPtr.Remaining)
-			if q <= 0 {
-				continue
-			}
-			tr := &domain.Trade{
-				ID:        uuid.New().String(),
-				Symbol:    o.Symbol,
-				BuyOrder:  o.ID,
-				SellOrder: otherPtr.ID,
-				Price:     otherPtr.Price,
-				Quantity:  q,
-				Timestamp: time.Now(),
-			}
-			executed = append(executed, tr)
-			o.Remaining -= q
-			otherPtr.Remaining -= q
-			if otherPtr.Remaining <= 0 {
-				otherPtr.Status = domain.Filled
-			}
-			if o.Remaining <= 0 {
-				o.Status = domain.Filled
-			}
-			e.trades[otherPtr.ID] = append(e.trades[otherPtr.ID], tr)
-			// persist trade via tx/repo
-			if tx != nil {
-				if err := tx.SaveTrade(ctx, tr); err != nil {
-					_ = tx.Rollback(ctx)
-					return nil, err
-				}
-			} else if e.repo != nil {
-				if err := e.repo.SaveTrade(ctx, tr); err != nil {
-					return nil, err
-				}
-			}
-		}
-	} else {
-		bids := ob.Bids
-		for i := 0; i < len(bids) && o.Remaining > 0; i++ {
-			otherPtr, ok := e.orders[bids[i].ID]
-			if !ok || otherPtr.Status != domain.Open {
-				continue
-			}
-			if !(o.Type == domain.Market || otherPtr.Price >= o.Price) {
-				break
-			}
-			q := min(o.Remaining, otherPtr.Remaining)
-			if q <= 0 {
-				continue
-			}
-			tr := &domain.Trade{
-				ID:        uuid.New().String(),
-				Symbol:    o.Symbol,
-				BuyOrder:  otherPtr.ID,
-				SellOrder: o.ID,
-				Price:     otherPtr.Price,
-				Quantity:  q,
-				Timestamp: time.Now(),
-			}
-			executed = append(executed, tr)
-			o.Remaining -= q
-			otherPtr.Remaining -= q
-			if otherPtr.Remaining <= 0 {
-				otherPtr.Status = domain.Filled
-			}
-			if o.Remaining <= 0 {
-				o.Status = domain.Filled
-			}
-			e.trades[otherPtr.ID] = append(e.trades[otherPtr.ID], tr)
-			if tx != nil {
-				if err := tx.SaveTrade(ctx, tr); err != nil {
-					_ = tx.Rollback(ctx)
-					return nil, err
-				}
-			} else if e.repo != nil {
-				if err := e.repo.SaveTrade(ctx, tr); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-
-	// persist final state of the incoming order
-	if tx != nil {
+	err := withTx(ctx, e.repo, func(tx port.Tx) error {
 		if err := tx.SaveOrder(ctx, o); err != nil {
-			_ = tx.Rollback(ctx)
-			return nil, err
+			return err
 		}
-		if err := tx.Commit(ctx); err != nil {
-			_ = tx.Rollback(ctx)
-			return nil, err
-		}
-	} else if e.repo != nil {
-		if err := e.repo.SaveOrder(ctx, o); err != nil {
-			return nil, err
-		}
+		var err error
+		executed, err = e.matchOrder(ctx, tx, o)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	// update cache
-	ob = e.getOrCreateOrderbook(o.Symbol)
-	// rebuild orderbook slices from current map to ensure they reflect pointer updates
-	e.rebuildOrderbookFromMap(o.Symbol)
-
-	if e.cache != nil {
-		_ = e.cache.SetOrderbook(ctx, o.Symbol, ob.DeepCopy())
+	updateOrderStatus(o)
+	err = withTx(ctx, e.repo, func(tx port.Tx) error {
+		return tx.SaveOrder(ctx, o)
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	// append executed trades to own trades map
-	e.trades[o.ID] = append(e.trades[o.ID], executed...)
+	updateCache(ctx, e.repo, e.cache, o.Symbol)
+	return executed, nil
+}
+
+func (e *Engine) matchOrder(ctx context.Context, tx port.Tx, o *domain.Order) ([]*domain.Trade, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	executed := []*domain.Trade{}
+	const batchSize = 200
+	now := time.Now().UTC()
+
+	for o.Remaining.GreaterThan(decimal.Zero) {
+		select {
+		case <-ctx.Done():
+			return executed, ctx.Err()
+		default:
+		}
+
+		var lp *decimal.Decimal
+		if o.Type == domain.Limit {
+			lp = &o.Price
+		}
+
+		cands, err := tx.LoadCandidatesForMatch(ctx, o.Symbol, o.Side, lp, batchSize)
+		if err != nil {
+			return executed, err
+		}
+		if len(cands) == 0 {
+			break
+		}
+
+		progressed := false
+		for _, other := range cands {
+			if o.Remaining.LessThanOrEqual(decimal.Zero) {
+				break
+			}
+			if !priceMatch(o, other) {
+				continue
+			}
+
+			q := decimal.Min(o.Remaining, other.Remaining)
+			if q.LessThanOrEqual(decimal.Zero) {
+				continue
+			}
+
+			tr := &domain.Trade{
+				ID:        uuid.New().String(),
+				Symbol:    o.Symbol,
+				BuyOrder:  chooseOrderID(o, other, domain.Buy),
+				SellOrder: chooseOrderID(o, other, domain.Sell),
+				Price:     other.Price,
+				Quantity:  q,
+				Timestamp: now,
+			}
+
+			if err := tx.SaveTrade(ctx, tr); err != nil {
+				return executed, err
+			}
+			executed = append(executed, tr)
+
+			o.Remaining = o.Remaining.Sub(q)
+			other.Remaining = other.Remaining.Sub(q)
+
+			updateOrderStatus(other)
+			if err := tx.SaveOrder(ctx, other); err != nil {
+				return executed, err
+			}
+
+			progressed = true
+		}
+
+		if !progressed {
+			break
+		}
+	}
 
 	return executed, nil
 }
 
-func (e *Engine) ModifyOrder(ctx context.Context, orderID, clientID string, newPrice, newQty float64) (bool, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	o, ok := e.orders[orderID]
-	if !ok || o.ClientID != clientID {
-		return false, errors.New("order not found")
+func priceMatch(o, other *domain.Order) bool {
+	if o.Type != domain.Limit {
+		return true
 	}
-	if o.Status != domain.Open {
-		return false, errors.New("cannot modify non-open order")
+	if o.Side == domain.Buy && o.Price.LessThan(other.Price) {
+		return false
 	}
-	ob := e.getOrCreateOrderbook(o.Symbol)
-	if o.Side == domain.Buy {
-		ob.Bids = removeOrder(ob.Bids, orderID)
-	} else {
-		ob.Asks = removeOrder(ob.Asks, orderID)
+	if o.Side == domain.Sell && o.Price.GreaterThan(other.Price) {
+		return false
 	}
-	o.Price = newPrice
-	o.Quantity = newQty
-	o.Remaining = newQty
-
-	if o.Side == domain.Buy {
-		ob.Bids = append(ob.Bids, *o)
-	} else {
-		ob.Asks = append(ob.Asks, *o)
-	}
-	sortOrders(ob)
-
-	if e.repo != nil {
-		_ = e.repo.ModifyOrder(ctx, orderID, clientID, newPrice, newQty)
-	}
-	if e.cache != nil {
-		_ = e.cache.SetOrderbook(ctx, o.Symbol, ob)
-	}
-	return true, nil
+	return true
 }
 
-func (e *Engine) CancelOrder(ctx context.Context, orderID, clientID string) (bool, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	o, ok := e.orders[orderID]
-	if !ok || o.ClientID != clientID {
-		return false, errors.New("order not found")
+func chooseOrderID(o1, o2 *domain.Order, side domain.Side) string {
+	if o1.Side == side {
+		return o1.ID
 	}
-	if o.Status != domain.Open {
-		return false, errors.New("cannot cancel non-open order")
-	}
-	o.Status = domain.Cancelled
-	o.Remaining = 0
-	ob := e.getOrCreateOrderbook(o.Symbol)
-	if o.Side == domain.Buy {
-		ob.Bids = removeOrder(ob.Bids, orderID)
-	} else {
-		ob.Asks = removeOrder(ob.Asks, orderID)
-	}
-	if e.repo != nil {
-		_ = e.repo.CancelOrder(ctx, orderID, clientID)
-	}
-	if e.cache != nil {
-		_ = e.cache.SetOrderbook(ctx, o.Symbol, ob)
-	}
-	return true, nil
+	return o2.ID
 }
 
-func (e *Engine) GetOrder(ctx context.Context, orderID string) (*domain.Order, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	o, ok := e.orders[orderID]
-	if !ok {
-		return nil, errors.New("order not found")
-	}
-	return o, nil
-}
-
-func (e *Engine) GetTradesForOrder(ctx context.Context, orderID string) ([]*domain.Trade, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	trades := e.trades[orderID]
-	return trades, nil
-}
-
-func (e *Engine) GetOrderbook(ctx context.Context, symbol string) (*domain.OrderbookSnapshot, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	// try cache first
+func (e *Engine) loadSnapshot(ctx context.Context, symbol string) (*domain.OrderbookSnapshot, error) {
 	if e.cache != nil {
 		if ob, err := e.cache.GetOrderbook(ctx, symbol); err == nil && ob != nil {
 			return ob, nil
 		}
 	}
-	ob, ok := e.orderbook[symbol]
-	if !ok {
-		return nil, errors.New("symbol not found")
+	if e.repo != nil {
+		ob, err := e.repo.LoadSnapshot(ctx, symbol)
+		if err == nil {
+			if e.cache != nil {
+				_ = e.cache.SetOrderbook(ctx, symbol, ob.DeepCopy())
+			}
+			return ob, nil
+		}
 	}
-	return ob, nil
+	return &domain.OrderbookSnapshot{
+		Symbol: symbol,
+		Bids:   []domain.Order{},
+		Asks:   []domain.Order{},
+	}, nil
+}
+
+func (e *Engine) ModifyOrder(ctx context.Context, orderID, clientID string, newPrice, newQty decimal.Decimal) error {
+	var symbol string
+	err := withTx(ctx, e.repo, func(tx port.Tx) error {
+		o, err := tx.LoadOrderByIDForClient(ctx, orderID, clientID)
+		if err != nil {
+			return err
+		}
+		if o.Status != domain.Open {
+			return errors.New("cannot modify non-open order")
+		}
+		o.Price = newPrice
+		o.Quantity = newQty
+		o.Remaining = newQty
+		symbol = o.Symbol
+		return tx.SaveOrder(ctx, o)
+	})
+	if err != nil {
+		return err
+	}
+
+	updateCache(ctx, e.repo, e.cache, symbol)
+	return nil
+}
+
+func (e *Engine) CancelOrder(ctx context.Context, orderID, clientID string) (bool, error) {
+	var symbol string
+	err := withTx(ctx, e.repo, func(tx port.Tx) error {
+		o, err := tx.LoadOrderByIDForClient(ctx, orderID, clientID)
+		if err != nil {
+			return err
+		}
+		if o.Status != domain.Open {
+			return errors.New("cannot cancel non-open order")
+		}
+		symbol = o.Symbol
+		return tx.CancelOrder(ctx, orderID, clientID)
+	})
+	if err != nil {
+		return false, err
+	}
+
+	updateCache(ctx, e.repo, e.cache, symbol)
+	return true, nil
+}
+
+func (e *Engine) GetOrderbook(ctx context.Context, symbol string) (*domain.OrderbookSnapshot, error) {
+	return getOrLoadSnapshot(ctx, e.repo, e.cache, symbol)
 }
 
 func (e *Engine) SnapshotOrderbook(ctx context.Context, symbol string) (string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	ob, ok := e.orderbook[symbol]
-	if !ok {
-		return "", errors.New("symbol not found")
+	if e.cache == nil {
+		return "", errors.New("cache not configured")
 	}
-	id := uuid.New().String()
-	copy := *ob
-	e.snapshots[id] = &copy
-	if e.repo != nil {
-		_ = e.repo.SaveSnapshot(ctx, id, symbol, &copy)
+
+	ob, err := e.GetOrderbook(ctx, symbol)
+	if err != nil {
+		return "", err
 	}
-	return id, nil
+
+	data, err := json.Marshal(ob)
+	if err != nil {
+		return "", err
+	}
+
+	snapshotID := uuid.NewString()
+	ttl := 24 * time.Hour
+	if err := e.cache.SetSnapshot(ctx, snapshotID, data, ttl); err != nil {
+		return "", err
+	}
+	return snapshotID, nil
 }
 
 func (e *Engine) RestoreOrderbook(ctx context.Context, snapshotID string) (bool, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	snap, ok := e.snapshots[snapshotID]
-	if !ok && e.repo != nil {
-		s, err := e.repo.LoadSnapshot(ctx, snapshotID)
-		if err != nil {
-			return false, err
-		}
-		snap = s
-		e.snapshots[snapshotID] = snap
-	} else if !ok {
+	if e.cache == nil {
+		return false, errors.New("cache not configured")
+	}
+
+	data, err := e.cache.GetSnapshot(ctx, snapshotID)
+	if err != nil {
+		return false, err
+	}
+	if data == nil {
 		return false, errors.New("snapshot not found")
 	}
-	e.orderbook[snap.Symbol] = snap
+
+	var ob domain.OrderbookSnapshot
+	if err := json.Unmarshal(data, &ob); err != nil {
+		return false, err
+	}
+
+	if err := e.cache.SetOrderbook(ctx, ob.Symbol, ob.DeepCopy()); err != nil {
+		return false, err
+	}
 
 	return true, nil
 }
 
-func (e *Engine) getOrCreateOrderbook(symbol string) *domain.OrderbookSnapshot {
-	ob, ok := e.orderbook[symbol]
-	if !ok {
-		ob = &domain.OrderbookSnapshot{}
-		e.orderbook[symbol] = ob
+func (e *Engine) GetOrder(ctx context.Context, orderID string) (*domain.Order, error) {
+	order, err := e.repo.LoadOrderByIDForClient(ctx, orderID, "")
+	if err != nil {
+		return nil, err
 	}
-	return ob
+	return order, nil
 }
 
-func sortOrders(ob *domain.OrderbookSnapshot) {
-	// bids: price desc, FIFO on CreatedAt
-	sort.SliceStable(ob.Bids, func(i, j int) bool {
-		if ob.Bids[i].Price != ob.Bids[j].Price {
-			return ob.Bids[i].Price > ob.Bids[j].Price
-		}
-		return ob.Bids[i].CreatedAt.Before(ob.Bids[j].CreatedAt)
-	})
-	// asks: price asc, FIFO on CreatedAt
-	sort.SliceStable(ob.Asks, func(i, j int) bool {
-		if ob.Asks[i].Price != ob.Asks[j].Price {
-			return ob.Asks[i].Price < ob.Asks[j].Price
-		}
-		return ob.Asks[i].CreatedAt.Before(ob.Asks[j].CreatedAt)
-	})
-}
-
-func removeOrder(orders []domain.Order, orderID string) []domain.Order {
-	for i, o := range orders {
-		if o.ID == orderID {
-			return append(orders[:i], orders[i+1:]...)
-		}
+func (e *Engine) GetTradesForOrder(ctx context.Context, orderID string) ([]*domain.Trade, error) {
+	trades, err := e.repo.LoadTradesForOrder(ctx, orderID)
+	if err != nil {
+		return nil, err
 	}
-	return orders
-}
-
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func (e *Engine) rebuildOrderbookFromMap(symbol string) {
-	ob := e.getOrCreateOrderbook(symbol)
-	ob.Bids = ob.Bids[:0]
-	ob.Asks = ob.Asks[:0]
-	for _, o := range e.orders {
-		if o.Symbol != symbol {
-			continue
-		}
-		if o.Side == domain.Buy && o.Remaining > 0 && o.Status == domain.Open {
-			ob.Bids = append(ob.Bids, *o)
-		}
-		if o.Side == domain.Sell && o.Remaining > 0 && o.Status == domain.Open {
-			ob.Asks = append(ob.Asks, *o)
-		}
-	}
-	sortOrders(ob)
+	return trades, nil
 }
